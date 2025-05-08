@@ -3,7 +3,6 @@ package energyaware
 import (
 	"context"
 	"fmt"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -12,69 +11,94 @@ import (
 	"sigs.k8s.io/scheduler-plugins/apis/config"
 )
 
-const Name = "EnergyAware"
+const (
+	Name               = "EnergyAware"
+	RecommendedNodeKey = Name + "/RecommendedNode"
+)
 
-var _ framework.ScorePlugin = &EnergyAware{}
+var (
+	_ framework.ScorePlugin    = &EnergyAware{}
+	_ framework.PreScorePlugin = &EnergyAware{}
+)
 
 type EnergyAware struct {
-	handle     framework.Handle
-	prometheus *PrometheusHandle
+	handle       framework.Handle
+	optimizerURL string
+}
+
+// RecommendedNodeState stores the selected node name
+type RecommendedNodeState struct {
+	NodeName string
+}
+
+func (r *RecommendedNodeState) Clone() framework.StateData {
+	return &RecommendedNodeState{NodeName: r.NodeName}
 }
 
 func (pl *EnergyAware) Name() string {
 	return Name
 }
 
-func (e *EnergyAware) Score(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) (int64, *framework.Status) {
-	nodeInfo, err := e.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
+// PreScore contacts the optimizer and stores the recommended node in CycleState
+func (pl *EnergyAware) PreScore(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodes []*framework.NodeInfo) *framework.Status {
+	klog.Infof("[EnergyAware] Contacting optimizer at %s for pod: %s", pl.optimizerURL, pod.Name)
+
+	recommendedNode, err := queryOptimizer(pl.optimizerURL, pod, nodes)
 	if err != nil {
-		return 0, framework.NewStatus(framework.Error, fmt.Sprintf("[EnergyAware] failed to get node info for %s: %v", nodeName, err))
-	}
-	internalIP, err := getInternalIP(nodeInfo.Node())
-
-	if err != nil {
-		return 0, framework.NewStatus(framework.Error, err.Error())
-	}
-	// Now pass internalIP instead of nodeName to Prometheus query
-	nodeBandwidth, err := e.prometheus.GetNodeBandwidthMeasure(internalIP)
-	if err != nil {
-		return 0, framework.NewStatus(framework.Error, err.Error())
+		return framework.NewStatus(framework.Error, fmt.Sprintf("[EnergyAware] Failed to query optimizer: %v", err))
 	}
 
-	klog.Infof("[EnergyAware] node '%s' (%s) bandwidth: %s", nodeName, internalIP, nodeBandwidth.Value)
-	return int64(nodeBandwidth.Value), nil
-}
-
-func (e *EnergyAware) ScoreExtensions() framework.ScoreExtensions {
-	return e
-}
-
-func (e *EnergyAware) NormalizeScore(ctx context.Context, state *framework.CycleState, pod *v1.Pod, scores framework.NodeScoreList) *framework.Status {
-	var higherScore int64
-	for _, node := range scores {
-		if node.Score > higherScore {
-			higherScore = node.Score
-		}
-	}
-
-	for i, node := range scores {
-		scores[i].Score = framework.MaxNodeScore - (node.Score * framework.MaxNodeScore / higherScore)
-	}
-
-	klog.Infof("[EnergyAware] Nodes final score: %v", scores)
+	klog.Infof("[EnergyAware] Optimizer recommended node: %s", recommendedNode)
+	state.Write(RecommendedNodeKey, &RecommendedNodeState{NodeName: recommendedNode})
 	return nil
 }
 
+// Score gives max score to recommended node, zero to others
+func (pl *EnergyAware) Score(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) (int64, *framework.Status) {
+	nodeState, err := getRecommendedNodeState(state)
+	if err != nil {
+		return 0, framework.NewStatus(framework.Error, err.Error())
+	}
+
+	if nodeName == nodeState.NodeName {
+		return framework.MaxNodeScore, nil
+	}
+	return 0, nil
+}
+
+func (pl *EnergyAware) ScoreExtensions() framework.ScoreExtensions {
+	return pl
+}
+
+// No normalization needed
+func (pl *EnergyAware) NormalizeScore(ctx context.Context, state *framework.CycleState, pod *v1.Pod, scores framework.NodeScoreList) *framework.Status {
+	return nil
+}
+
+// New initializes the plugin with handle and URL
 func New(_ context.Context, obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
 	args, ok := obj.(*config.EnergyAwareArgs)
 	if !ok {
 		return nil, fmt.Errorf("[EnergyAware] want args to be of type EnergyAwareArgs, got %T", obj)
 	}
 
-	klog.Infof("[EnergyAware] args received. NetworkInterface: %s; TimeRangeInMinutes: %d, Address: %s", args.NetworkInterface, args.TimeRangeInMinutes, args.Address)
+	klog.Infof("[EnergyAware] Plugin initialized with OptimizerURL: %s", args.OptimizerURL)
 
 	return &EnergyAware{
-		handle:     h,
-		prometheus: NewPrometheus(args.Address, args.NetworkInterface, time.Minute*time.Duration(args.TimeRangeInMinutes)),
+		handle:       h,
+		optimizerURL: args.OptimizerURL,
 	}, nil
+}
+
+// Helper to retrieve recommended node from CycleState
+func getRecommendedNodeState(state *framework.CycleState) (*RecommendedNodeState, error) {
+	data, err := state.Read(RecommendedNodeKey)
+	if err != nil {
+		return nil, fmt.Errorf("[EnergyAware] Failed to read state: %w", err)
+	}
+	nodeState, ok := data.(*RecommendedNodeState)
+	if !ok {
+		return nil, fmt.Errorf("[EnergyAware] Unexpected data type: %T", data)
+	}
+	return nodeState, nil
 }

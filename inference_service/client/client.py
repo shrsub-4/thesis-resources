@@ -3,11 +3,11 @@ import time
 
 def sendRequest():
     # Define the server URL
-    url = "http://10.104.8.215:31544/upload"
+    url = "http://192.168.112.23:30912/upload"
 
     # Set the headers (including the required Host header)
     headers = {
-        "Host": "appservice.default.example.com"
+        "Host": "appservice.shadow.example.com"
     }
 
     # Define the form data
@@ -29,6 +29,6 @@ def sendRequest():
     print("Response Body:", response.text)
 
 if __name__=="__main__":
-    for i in range(100):
+    for i in range(1000):
         sendRequest()
         time.sleep(1)
