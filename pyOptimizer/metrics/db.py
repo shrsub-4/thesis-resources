@@ -6,23 +6,6 @@ from datetime import datetime
 class DBManager:
     def __init__(self, db_path="metrics.db"):
         self.db_path = db_path
-        self._initialize_db()
-
-    def _initialize_db(self):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS metrics_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    node TEXT,
-                    latency REAL,
-                    bandwidth REAL,
-                    timestamp TEXT
-                )
-            """
-            )
-            conn.commit()
 
     def write_metrics(self, metrics: dict, node: str = None):
         if not metrics:
@@ -33,13 +16,14 @@ class DBManager:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO metrics_log (node, latency, bandwidth, timestamp)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO metrics_log (node, latency, bandwidth, energy, timestamp)
+                VALUES (?, ?, ?, ?, ?)
             """,
                 (
                     node,
                     metrics.get("request_duration"),
                     metrics.get("per_request_bandwidth"),
+                    metrics.get("energy_watts"),
                     datetime.utcnow().isoformat(),
                 ),
             )

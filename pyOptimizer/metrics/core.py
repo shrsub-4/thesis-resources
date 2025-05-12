@@ -1,16 +1,16 @@
 import os
 import time
+from collections import defaultdict
 from collections import deque
+from xml.dom.expatbuilder import parseString
 
 from metrics.metrics import MetricsCollector
-from metrics.placement import PlacementManager
 from metrics.metrics import MetricsCollector
 from metrics.request import RequestGenerator
 from metrics.prometheus import PrometheusClient
 from metrics.db import DBManager
 
 PROM_URL = os.getenv("PROM_URL", "http://localhost:9090")
-KUBE_CONFIG = os.getenv("KUBE_CONFIG", "~/.kube/config")
 
 timeout = 10  # Timeout for app readiness check
 
@@ -20,75 +20,50 @@ class MetricsCore:
         self.config = config
         self.prom = PrometheusClient(PROM_URL)
         self.collector = MetricsCollector(prom=self.prom)
-        self.requester = RequestGenerator(url=self.config["application_url"])
-        self.placement_manager = PlacementManager(config_file=KUBE_CONFIG)
         self.db = DBManager()
-        self.source_workload = self.config["workloads"][0]
-        self.destination_workload = self.config["workloads"][1]
 
-    def _open_file(self, file_path):
-        if os.path.exists(file_path):
-            return self._open_file(file_path)
-        else:
-            return None
+    def _flatten_pod_node_map(self, grouped_map):
+        flat_map = {}
+        for service, nodes in grouped_map.items():
+            for node, pods in nodes.items():
+                for pod in pods:
+                    flat_map[pod] = node
+        return flat_map
 
-    def _request_pod(self):
-        headers = self.config["request"]["headers"]
-        data = self.config["request"]["data"]
-        files = self.config["request"]["files"]
+    def aggregate_metrics_by_node(self, metrics_by_pod, pod_node_map):
+        node_metrics = defaultdict(
+            lambda: {"latency": [], "bandwidth": [], "energy": 0}
+        )
+        pod_node_map = self._flatten_pod_node_map(pod_node_map)
 
-        for _ in range(2):
-            if files:
-                file = {
-                    "image": (files["name"], open(files["path"], "rb"), files["type"])
-                }
-            resp_code, duration = self.requester.send_request(
-                headers=headers, data=data, files=file
-            )
-            print(f"Response code: {resp_code}, Duration: {duration}")
+        for pod, node in pod_node_map.items():
+            if pod in metrics_by_pod.get("latency", {}):
+                node_metrics[node]["latency"].append(metrics_by_pod["latency"][pod])
+            if pod in metrics_by_pod.get("bandwidth", {}):
+                node_metrics[node]["bandwidth"].append(metrics_by_pod["bandwidth"][pod])
+            if pod in metrics_by_pod.get("energy", {}):
+                node_metrics[node]["energy"] += metrics_by_pod["energy"][pod]
 
-    def _collect_metrics(self):
-        metrics = []
+        final = {}
+        for node, values in node_metrics.items():
+            final[node] = {
+                "latency": (
+                    sum(values["latency"]) / len(values["latency"])
+                    if values["latency"]
+                    else 0
+                ),
+                "bandwidth": (
+                    sum(values["bandwidth"]) / len(values["bandwidth"])
+                    if values["bandwidth"]
+                    else 0
+                ),
+                "energy": values["energy"],
+            }
+        return final
 
+    def collect_metrics(self, source_workload, destination_workload):
         resp = self.collector.get_metrics(
-            source_workload=self.config["workloads"][0],
-            destination_workload=self.config["workloads"][1],
+            source_workload=source_workload,
+            destination_workload=destination_workload,
         )
         return resp
-
-    def loop(self):
-        node_queue = deque(self.config["nodes"])
-        while node_queue:
-            print(node_queue)
-            node = node_queue.popleft()
-
-            # ==== Placement Logic
-            actual_node = self.placement_manager.get_running_node(
-                app_name=self.source_workload
-            )
-            if actual_node != node:
-                print(
-                    f"App {self.source_workload} expect on {node} but found in {actual_node}. Rotating.."
-                )
-                print(f"Placing {self.source_workload} on {node}")
-                self.placement_manager.place_app_on(
-                    node_name=node, deployment_name=self.source_workload
-                )
-                time.sleep(5)
-
-            print(f"App {self.source_workload} is running on {node}")
-
-            if not self.placement_manager.is_app_ready(app_name=self.source_workload):
-                print(f"App {self.source_workload} is not ready on {node}. Skipping...")
-                node_queue.append(node)
-                continue
-
-            # ==== Metrics Logic
-            print("Sending request to pod...")
-            self._request_pod()
-
-            metrics = self._collect_metrics()
-            if not metrics or metrics.get("request_duration") is None:
-                print("No metrics collected for node {node}. Skipping...")
-                continue
-            self.db.write_metrics(metrics=metrics, node=node)
