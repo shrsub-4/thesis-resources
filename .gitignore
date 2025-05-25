@@ -13,6 +13,7 @@ venv/
 inference_service/env/
 .env
 .envrc
+.pytest_cache/
 
 # Jupyter Notebook
 .ipynb_checkpoints/
