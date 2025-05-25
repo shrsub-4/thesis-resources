@@ -4,10 +4,10 @@ import time
 
 def sendRequest():
     # Define the server URL
-    url = "http://192.168.120.23:31757/upload"
+    url = "http://192.168.163.23:30772/upload"
 
     # Set the headers (including the required Host header)
-    headers = {"Host": "appservice.default.example.com"}
+    headers = {"Host": "knappservice.default.example.com"}
 
     # Define the form data
     data = {"lidar_distance": "2.0", "radar_speed": "5.4", "ultrasonic": "3.2"}
