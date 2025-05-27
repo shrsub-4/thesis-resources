@@ -8,25 +8,32 @@ app = FastAPI()
 MODEL_DEPOT_URL = os.getenv(
     "MODEL_DEPOT_URL", "http://s2-modeldepot.default.svc.cluster.local"
 )
-MODEL_DIR = "/tmp"
-MODEL_CFG = os.path.join(MODEL_DIR, "yolov4-tiny.cfg")
-MODEL_WEIGHTS = os.path.join(MODEL_DIR, "yolov4-tiny.weights")
-MODEL_CLASSES = os.path.join(MODEL_DIR, "coco.names")
+TMP_MODEL_DIR = "/tmp"
+SHARED_MODEL_PATH = os.getenv("SHARED_MODEL_DIR", "/mnt/shared-models")
+
+MODEL_CFG = os.path.join(TMP_MODEL_DIR, "yolov4-tiny.cfg")
+MODEL_WEIGHTS = os.path.join(TMP_MODEL_DIR, "yolov4-tiny.weights")
+MODEL_CLASSES = os.path.join(TMP_MODEL_DIR, "coco.names")
 
 
 def ensure_model_files():
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    files = {
-        MODEL_CFG: "yolov4-tiny.cfg",
-        MODEL_WEIGHTS: "yolov4-tiny.weights",
-        MODEL_CLASSES: "coco.names",
-    }
+    os.makedirs(TMP_MODEL_DIR, exist_ok=True)
+    files = ["yolov4-tiny.cfg", "yolov4-tiny.weights", "coco.names"]
 
-    for local_path, remote_name in files.items():
-        if not os.path.isfile(local_path):
-            r = requests.get(f"{MODEL_DEPOT_URL}/model/{remote_name}", stream=True)
+    for file in files:
+        local_path = os.path.join(TMP_MODEL_DIR, file)
+        if os.path.isfile(local_path):
+            continue
+
+        pvc_path = os.path.join(SHARED_MODEL_PATH, file)
+        if os.path.exists(pvc_path):
+            with open(pvc_path, "rb") as src, open(local_path, "wb") as dst:
+                dst.write(src.read())
+
+        else:
+            r = requests.get(f"{MODEL_DEPOT_URL}/model/{file}", stream=True)
             if r.status_code != 200:
-                raise RuntimeError(f"Failed to fetch {remote_name} from ModelDepot")
+                raise RuntimeError(f"Failed to fetch {file} from ModelDepot")
             with open(local_path, "wb") as f:
                 for chunk in r.iter_content(8192):
                     f.write(chunk)

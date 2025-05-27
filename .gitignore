@@ -10,6 +10,7 @@ build/
 *.log
 .venv/
 venv/
+env/
 inference_service/env/
 .env
 .envrc
