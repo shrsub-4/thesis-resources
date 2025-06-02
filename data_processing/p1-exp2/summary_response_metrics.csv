@@ -1,0 +1,4 @@
+Service,Request_Count,Failure_Count,Avg_Response_Time_ms,Max_Response_Time_ms
+S1 Inference,16.0,0.0,2416.57,12589.91
+S4 Flood,19.33,1.0,1334.23,17342.25
+S5 Audio,19.33,0.0,1371.9,11036.58

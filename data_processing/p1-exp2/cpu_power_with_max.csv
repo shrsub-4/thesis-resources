@@ -1,0 +1,6 @@
+Service,Avg_CPU_Util,Avg_Power_W,Max_Power_W
+S1 Inference,0.2223,1.0082,1.4521
+S2 Storage,0.0077,0.0348,0.042
+S3 Sensor Process,0.0187,0.0847,0.2154
+S4 Flood,0.0262,0.1188,0.318
+S5 Audio,0.0354,0.1605,0.2909
