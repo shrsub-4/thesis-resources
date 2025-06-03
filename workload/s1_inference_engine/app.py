@@ -20,6 +20,8 @@ def ensure_model_files():
     os.makedirs(TMP_MODEL_DIR, exist_ok=True)
     files = ["yolov4-tiny.cfg", "yolov4-tiny.weights", "coco.names"]
 
+    total_download_size = 0  # total bytes fetched
+
     for file in files:
         local_path = os.path.join(TMP_MODEL_DIR, file)
         if os.path.isfile(local_path):
@@ -28,7 +30,9 @@ def ensure_model_files():
         pvc_path = os.path.join(SHARED_MODEL_PATH, file)
         if os.path.exists(pvc_path):
             with open(pvc_path, "rb") as src, open(local_path, "wb") as dst:
-                dst.write(src.read())
+                data = src.read()
+                total_download_size += len(data)
+                dst.write(data)
 
         else:
             r = requests.get(f"{MODEL_DEPOT_URL}/model/{file}", stream=True)
@@ -36,7 +40,11 @@ def ensure_model_files():
                 raise RuntimeError(f"Failed to fetch {file} from ModelDepot")
             with open(local_path, "wb") as f:
                 for chunk in r.iter_content(8192):
-                    f.write(chunk)
+                    if chunk:
+                        total_download_size += len(chunk)
+                        f.write(chunk)
+
+    return total_download_size
 
 
 def get_net():
@@ -59,7 +67,7 @@ def load_classes():
 async def infer(file: UploadFile = File(...)):
     try:
         start_total = time.time()
-        ensure_model_files()
+        download_size = ensure_model_files()
         fetch_duration = time.time() - start_total
 
         classes = load_classes()
@@ -108,6 +116,7 @@ async def infer(file: UploadFile = File(...)):
             },
             "metrics": {
                 "model_fetch_latency_seconds": fetch_duration,
+                "model_download_bytes": download_size,
                 "inference_duration_seconds": infer_duration,
                 "input_size_bytes": len(image_np),
             },

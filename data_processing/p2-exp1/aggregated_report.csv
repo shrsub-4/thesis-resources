@@ -1,0 +1,4 @@
+Name,Request Count,Failure Count,Median Response Time,Average Response Time,Min Response Time,Max Response Time,Average Content Size,Requests/s,Failures/s
+S1 Inference,61.33,0.33,4700.0,7297.4,1772.8,39489.25,235.69,0.34,0.0
+S4 Flood,46.67,5.67,6700.0,9311.12,1155.7,29949.97,172.56,0.26,0.03
+S5 Audio,110.33,0.0,2966.67,3448.51,730.86,10229.85,187.91,0.61,0.0

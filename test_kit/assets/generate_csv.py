@@ -8,7 +8,7 @@ with open("sensors.csv", "w", newline="") as f:
 
     base_time = datetime.utcnow()
 
-    for i in range(100000):
+    for i in range(10000):
         ts = (base_time + timedelta(seconds=i * 5)).isoformat() + "Z"
         temp = round(random.uniform(20.0, 25.0), 1)
         humid = round(random.uniform(40.0, 50.0), 1)

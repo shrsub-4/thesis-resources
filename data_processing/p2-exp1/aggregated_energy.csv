@@ -1,0 +1,5 @@
+name,cpu_util,power,memory_util
+master,0.0,0.0,0.0
+worker-1,0.06,2.58,0.2
+worker-2,0.14,2.94,0.34
+worker-3,0.08,2.45,0.14

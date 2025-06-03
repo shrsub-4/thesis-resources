@@ -45,7 +45,7 @@ class SensorFloodUser(HttpUser):
             with open(CSV_PATH, "rb") as f:
                 start = time.time()
                 r = self.client.post(
-                    "/upload?batch_size=20",
+                    "/upload?batch_size=10000",
                     files={"file": ("sensors.csv", f, "text/csv")},
                     headers={"Host": FLOOD_HOST},
                     timeout=30,
