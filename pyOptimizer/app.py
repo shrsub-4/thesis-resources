@@ -1,15 +1,15 @@
-from math import e
 import os
+import re
 import datetime
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 from dotenv import load_dotenv
 
 from config import config as application_config
 from metrics import k8s
 from metrics.core import MetricsCore
-from optimizer.core import PlacementOptimizer
 from metrics.logger import ExperimentLogger
+from optimizer.core import HeuristicScheduler
 
 load_dotenv()
 # Initialize Flask app
@@ -20,26 +20,66 @@ SERVICE_NAME = os.getenv("SERVICE_NAME", "autocar")
 
 config = application_config.get(SERVICE_NAME)
 metrics_core = MetricsCore(config=config)
-optimizer = PlacementOptimizer(config=config)
 k8s_manager = k8s.KubernetesManager(config_file=KUBE_CONFIG)
 logger = ExperimentLogger()
 
 
+def extract_service_name(pod_name: str) -> str:
+    """
+    Extracts full Knative service name from a pod name.
+    Example: 's1-inference-00016-deployment-xyz' → 's1-inference'
+    """
+    match = re.match(r"^(.*)-\d{5}-deployment.*", pod_name)
+    if match:
+        return match.group(1)
+    return pod_name.split("-")[0]
+
+
 @app.route("/get_node")
 def get_node():
-    placement_map = k8s_manager.get_pod_mapping(services=config["workloads"])
-    network_metrics = metrics_core.collect_network_metrics(placement_map)
-    energy_metrics = metrics_core.collect_energy_metrics(
-        placement_map, k8s_manager.get_internal_ip_mapping()
-    )
-    print("Network Metrics:", network_metrics)
-    print("Energy Metrics:", energy_metrics)
-    best_node = optimizer.loop(network_metrics, placement_map)
 
+    pod_name = request.args.get("pod")
+    nodes = request.args.get("nodes", "").split(",")
+
+    service_name = extract_service_name(pod_name) if pod_name else None
+    if service_name not in config["workloads"]:
+        return jsonify({"error": "No pod name provided"}), 400
+
+    placement_map = k8s_manager.get_pod_mapping(services=config["workloads"])
+
+    latency_metrics = metrics_core.collect_latency_metrics(service_name)
+
+    source_workload = service_name
+    destination_workload = config["associations"].get(service_name)
+
+    traffic_metrics = None
+    if destination_workload is not None:
+        traffic_metrics = metrics_core.collect_traffic_metrics(
+            source_workload=source_workload,
+            destination_workload=destination_workload,
+        )
+
+    smart_cfg = config
+
+    scheduler = HeuristicScheduler(
+        placement_map=placement_map,
+        nodes=nodes,
+        config={
+            "node_latency": latency_metrics,
+            "node_traffic": traffic_metrics,
+            "traffic_weight": smart_cfg["gamma"],
+            "latency_weight": smart_cfg["alpha"],
+            "energy_weight": smart_cfg["beta"],
+            "association_graph": smart_cfg["association_graph"],
+        },
+    )
+
+    node, score = scheduler.place(service_name)
+    print(f"Placing {service_name} on {node} with score {score}")
     return jsonify(
         {
-            "node": best_node,
-            "score": 1.0,
+            "node": node,
+            "score": score,
             "timestamp": datetime.datetime.now().isoformat(),
         }
     )
@@ -53,7 +93,7 @@ def dashboard():
     placement_map = k8s_manager.get_pod_mapping(services=config["workloads"])
     ip_mapping = k8s_manager.get_internal_ip_mapping()
 
-    energy = metrics_core.collect_energy_metrics(placement_map, ip_mapping)
+    energy = metrics_core.collect_dashboard_energy_metrics(placement_map, ip_mapping)
     timestamp = datetime.datetime.now().isoformat()
 
     node_rows = []
@@ -83,9 +123,6 @@ def dashboard():
                 "memory_mib": row.get("memory_mib", 0.0),
             }
         )
-
-    # logger.log(node_rows, filename="t1_node_log.csv")
-    # logger.log(pod_rows, filename="t5_pod_log.csv")
 
     return jsonify({"metrics": energy, "mapping": placement_map})
 

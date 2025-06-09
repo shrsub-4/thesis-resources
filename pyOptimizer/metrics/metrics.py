@@ -10,6 +10,8 @@ from metrics.queries import (
     POD_MEMORY,
     NODE_MEMORY,
     REQUEST_TOTAL,
+    REQUEST_SIZE_QUERY,
+    RESPONSE_SIZE_QUERY,
 )
 from metrics.prometheus import PrometheusClient
 from dotenv import load_dotenv
@@ -36,6 +38,45 @@ class MetricsCollector:
                 continue
 
         return node_latencies
+
+    def _get_request_size(self, source_workload, destination_workload):
+        result = self.prom.query(
+            REQUEST_SIZE_QUERY.format(
+                source=source_workload, destination=destination_workload
+            )
+        )
+        for entry in result:
+            try:
+                value = float(entry["value"][1])
+                if not math.isnan(value):
+                    return value
+            except (ValueError, TypeError):
+                continue
+
+    def _get_response_size(self, source_workload, destination_workload):
+        result = self.prom.query(
+            RESPONSE_SIZE_QUERY.format(
+                source=source_workload, destination=destination_workload
+            )
+        )
+        for entry in result:
+            try:
+                value = float(entry["value"][1])
+                if not math.isnan(value):
+                    return value
+            except (ValueError, TypeError):
+                continue
+        return None
+
+    def get_request_response_sizes(self, source_workload, destination_workload):
+        request_size = self._get_request_size(source_workload, destination_workload)
+        response_size = self._get_response_size(source_workload, destination_workload)
+        try:
+            sum = request_size + response_size
+            return sum
+        except Exception as e:
+            print(f"Error calculating request/response size: {e}")
+            return None
 
     def _clean_name(self, workload: str) -> str:
         """
@@ -171,7 +212,32 @@ class MetricsCollector:
             return None
         return None
 
-    def get_energy_metrics(self, placement_map: dict, ip_mapping: dict) -> dict:
+    # =========== Metrics Collection
+    def get_energy_metrics(self, placement_map: dict, ip_mapping: dict = None) -> dict:
+        """
+        Returns energy-related metrics per node: normalized CPU and power.
+        Suitable for scheduler cost computation.
+        """
+        CORES_PER_NODE = 4.0
+        node_energy = {}
+
+        for node, ip in ip_mapping.items():
+            cpu_util = self._get_node_cpu_util(ip)
+            if cpu_util is None:
+                continue
+            power = 4.5344 * cpu_util + 2.2857  # Optional base load offset
+            node_energy[node] = {
+                "cpu_util": round(cpu_util, 6),
+                "power": round(power, 6),
+            }
+
+        return node_energy
+
+    # =========== Dashboard Metrics
+
+    def get_energy_metrics_dashboard(
+        self, placement_map: dict, ip_mapping: dict
+    ) -> dict:
         CORES_PER_NODE = 4.0
         pod_metrics = []
         node_metrics = []

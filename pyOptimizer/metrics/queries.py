@@ -1,12 +1,43 @@
+# Netwrork queries for Prometheus
+
 LATENCY_QUERY = """
-histogram_quantile(0.95, sum(
+histogram_quantile(0.5, sum(
   irate(istio_request_duration_milliseconds_bucket{{
-    reporter="destination",
+    reporter=~"destination",
     destination_workload=~"^{destination}.*",
-    destination_workload_namespace="default"
+    destination_workload_namespace=~"default",
+    source_workload=~"(istio-ingressgateway)",
+    source_workload_namespace=~"(istio-system)"
   }}[1m])
 ) by (node, le))
 """
+
+REQUEST_SIZE_QUERY = """
+histogram_quantile(0.50,
+  sum(
+    irate(istio_request_bytes_bucket{{
+      reporter="source",
+      source_workload=~"^{source}.*",
+      source_workload_namespace="default",
+      destination_workload=~"^{destination}.*"
+    }}[1m])
+  ) by (pod, le)
+)
+"""
+
+RESPONSE_SIZE_QUERY = """
+histogram_quantile(0.50,
+  sum(
+    irate(istio_response_bytes_bucket{{
+      reporter="source",
+      source_workload=~"^{source}.*",
+      source_workload_namespace="default",
+      destination_workload=~"^{destination}.*"
+    }}[1m])
+  ) by (pod, le)
+)
+"""
+
 
 BYTES_PER_SEC_QUERY = """
 sum(
@@ -30,6 +61,8 @@ REQUEST_TOTAL = """
 sum(irate(istio_requests_total{
   namespace="default"
 }[1m])) by (source_workload, destination_workload)"""
+
+# Energy queries for Prometheus metrics
 
 POD_ENERGY = """
 sum(rate(container_cpu_usage_seconds_total{{

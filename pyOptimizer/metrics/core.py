@@ -1,5 +1,4 @@
 import os
-import networkx as nx
 from collections import defaultdict
 
 from metrics.metrics import MetricsCollector
@@ -52,24 +51,35 @@ class MetricsCore:
             }
         return final
 
-    def collect_network_metrics(self, placement_map):
-        entrypoints = self.config["entrypoints"]
-
-        if not entrypoints:
-            raise ValueError("No entrypoints defined in the configuration.")
-
-        for entrypoint in entrypoints:
-            latency_metrics = self.collector._get_workload_request_duration(
-                destination_workload=entrypoint,
-            )
+    def collect_latency_metrics(self, service_name):
+        latency_metrics = self.collector._get_workload_request_duration(
+            destination_workload=service_name,
+        )
 
         return latency_metrics
 
-    # ========== Energy Metrics
+    def collect_traffic_metrics(self, source_workload, destination_workload):
+        traffic_metrics = self.collector.get_request_response_sizes(
+            source_workload=source_workload,
+            destination_workload=destination_workload,
+        )
+
+        return traffic_metrics
 
     def collect_energy_metrics(self, placement_map, ip_mapping=None):
         """
         Collect energy metrics for the given placement map.
         """
         raw_metrics = self.collector.get_energy_metrics(placement_map, ip_mapping)
+        return raw_metrics
+
+    # ========== Energy Metrics
+
+    def collect_dashboard_energy_metrics(self, placement_map, ip_mapping=None):
+        """
+        Collect energy metrics for the given placement map.
+        """
+        raw_metrics = self.collector.get_energy_metrics_dashboard(
+            placement_map, ip_mapping
+        )
         return raw_metrics
